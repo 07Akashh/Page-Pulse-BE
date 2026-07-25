@@ -4,12 +4,12 @@ import { auditRequestSchema } from '../../../src/modules/audit/validators/url.va
 describe('URL Validator', () => {
   describe('valid URLs', () => {
     it.each([
-      'https://example.com',
+      'https://www.example.com',
       'http://example.com',
       'https://www.google.com',
-      'https://example.com/path?q=1#hash',
+      'https://www.example.com/path?q=1#hash',
       'https://sub.domain.co.uk',
-      'https://example.com:8080',
+      'https://www.example.com:8080',
       'https://192.0.2.1',
     ])('accepts %s', (url) => {
       const result = auditRequestSchema.safeParse({ url });
@@ -80,16 +80,13 @@ describe('URL Validator', () => {
   });
 
   describe('rejects malformed URLs', () => {
-    it.each([
-      'not-a-url',
-      'example.com',
-      'https://',
-      '//example.com',
-      'http://[invalid-ipv6]',
-    ])('rejects %s', (url) => {
-      const result = auditRequestSchema.safeParse({ url });
-      expect(result.success).toBe(false);
-    });
+    it.each(['not-a-url', 'example.com', 'https://', '//example.com', 'http://[invalid-ipv6]'])(
+      'rejects %s',
+      (url) => {
+        const result = auditRequestSchema.safeParse({ url });
+        expect(result.success).toBe(false);
+      },
+    );
   });
 
   describe('error messages', () => {

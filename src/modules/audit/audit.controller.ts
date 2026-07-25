@@ -1,18 +1,5 @@
-import {
-  Controller,
-  Post,
-  Body,
-  HttpCode,
-  HttpStatus,
-  Req,
-  UsePipes,
-} from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBody,
-} from '@nestjs/swagger';
+import { Controller, Post, Body, HttpCode, HttpStatus, Req, UsePipes } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { AuditService, QueueFullError, AuditTimeoutError } from './audit.service';
 import { auditRequestSchema } from './validators/url.validator';
@@ -50,7 +37,7 @@ export class AuditController {
         url: {
           type: 'string',
           format: 'uri',
-          example: 'https://example.com',
+          example: 'https://www.example.com',
         },
       },
     },

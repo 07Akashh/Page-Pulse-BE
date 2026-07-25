@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AuditService, QueueFullError, AuditTimeoutError } from '../../../src/modules/audit/audit.service';
+import {
+  AuditService,
+  QueueFullError,
+  AuditTimeoutError,
+} from '../../../src/modules/audit/audit.service';
 import type { AuditResult } from '../../../src/common/types';
 
 const mockAuditResult: AuditResult = {
@@ -65,7 +69,7 @@ describe('AuditService', () => {
     it('returns cached result with cached:true', async () => {
       auditRepositoryMock.findCachedAudit.mockResolvedValue(mockAuditResult);
 
-      const result = await auditService.auditUrl('https://example.com', 'req-123');
+      const result = await auditService.auditUrl('https://www.example.com', 'req-123');
 
       expect(result.success).toBe(true);
       expect(result.cached).toBe(true);
@@ -81,13 +85,13 @@ describe('AuditService', () => {
         .mockResolvedValueOnce(null)
         .mockResolvedValue(mockAuditResult);
 
-      const result = await auditService.auditUrl('https://example.com', 'req-456');
+      const result = await auditService.auditUrl('https://www.example.com', 'req-456');
 
       expect(result.success).toBe(true);
       expect(result.cached).toBe(false);
       expect(result.audit).toEqual(mockAuditResult);
       expect(queueServiceMock.dispatchAuditJob).toHaveBeenCalledWith(
-        expect.objectContaining({ url: 'https://example.com', requestId: 'req-456' }),
+        expect.objectContaining({ url: 'https://www.example.com', requestId: 'req-456' }),
       );
     });
 
@@ -95,9 +99,9 @@ describe('AuditService', () => {
       auditRepositoryMock.findCachedAudit.mockResolvedValue(null);
       queueServiceMock.dispatchAuditJob.mockResolvedValue(null);
 
-      await expect(
-        auditService.auditUrl('https://example.com', 'req-789'),
-      ).rejects.toThrow(QueueFullError);
+      await expect(auditService.auditUrl('https://www.example.com', 'req-789')).rejects.toThrow(
+        QueueFullError,
+      );
     });
 
     it('throws AuditTimeoutError when result never arrives', async () => {
@@ -113,7 +117,7 @@ describe('AuditService', () => {
     it('includes requestId in success response', async () => {
       auditRepositoryMock.findCachedAudit.mockResolvedValue(mockAuditResult);
 
-      const result = await auditService.auditUrl('https://example.com', 'my-request-id');
+      const result = await auditService.auditUrl('https://www.example.com', 'my-request-id');
       expect(result.requestId).toBe('my-request-id');
     });
   });

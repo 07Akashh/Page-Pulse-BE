@@ -27,7 +27,7 @@ export const auditUrlSchema = z
         return false;
       }
     },
-    { message: 'url must be a valid URL (e.g. https://example.com)' },
+    { message: 'url must be a valid URL (e.g. https://www.example.com)' },
   )
   .refine(
     (val) => {

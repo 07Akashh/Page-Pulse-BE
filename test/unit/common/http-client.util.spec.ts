@@ -16,12 +16,12 @@ describe('httpFetch', () => {
     const mockHeaders = new Map([['content-type', 'text/html']]);
     (mockFetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
       status: 200,
-      url: 'https://example.com',
+      url: 'https://www.example.com',
       text: vi.fn().mockResolvedValue('<html><title>Test</title></html>'),
       headers: mockHeaders,
     });
 
-    const result = await httpFetch('https://example.com', {
+    const result = await httpFetch('https://www.example.com', {
       timeoutMs: 1000,
       maxRetries: 1,
       retryBaseDelayMs: 10,
@@ -29,7 +29,7 @@ describe('httpFetch', () => {
 
     expect(result.statusCode).toBe(200);
     expect(result.body).toContain('<title>Test</title>');
-    expect(result.finalUrl).toBe('https://example.com');
+    expect(result.finalUrl).toBe('https://www.example.com');
   });
 
   it('throws HttpTimeoutError when request times out (AbortError)', async () => {
@@ -39,7 +39,7 @@ describe('httpFetch', () => {
     (mockFetch as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(abortErr);
 
     await expect(
-      httpFetch('https://example.com', {
+      httpFetch('https://www.example.com', {
         timeoutMs: 50,
         maxRetries: 0,
         retryBaseDelayMs: 10,
@@ -54,7 +54,7 @@ describe('httpFetch', () => {
     (mockFetch as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(connErr);
 
     await expect(
-      httpFetch('https://example.com', {
+      httpFetch('https://www.example.com', {
         timeoutMs: 1000,
         maxRetries: 1,
         retryBaseDelayMs: 10,

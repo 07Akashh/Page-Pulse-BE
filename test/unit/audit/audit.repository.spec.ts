@@ -42,20 +42,20 @@ describe('AuditRepository', () => {
   describe('findCachedAudit', () => {
     it('returns result on cache hit', async () => {
       cacheServiceMock.get.mockResolvedValue(mockAuditResult);
-      const res = await repository.findCachedAudit('https://example.com');
+      const res = await repository.findCachedAudit('https://www.example.com');
       expect(res).toEqual(mockAuditResult);
     });
 
     it('returns null on cache miss', async () => {
       cacheServiceMock.get.mockResolvedValue(null);
-      const res = await repository.findCachedAudit('https://example.com');
+      const res = await repository.findCachedAudit('https://www.example.com');
       expect(res).toBeNull();
     });
   });
 
   describe('cacheAudit', () => {
     it('saves audit to cache service', async () => {
-      await repository.cacheAudit('https://example.com', mockAuditResult);
+      await repository.cacheAudit('https://www.example.com', mockAuditResult);
       expect(cacheServiceMock.set).toHaveBeenCalledWith(
         expect.stringContaining('cache:audit:'),
         mockAuditResult,
@@ -65,7 +65,7 @@ describe('AuditRepository', () => {
 
   describe('invalidate', () => {
     it('deletes entry from cache', async () => {
-      await repository.invalidate('https://example.com');
+      await repository.invalidate('https://www.example.com');
       expect(cacheServiceMock.del).toHaveBeenCalled();
     });
   });

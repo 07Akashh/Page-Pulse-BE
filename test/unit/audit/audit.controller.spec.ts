@@ -41,7 +41,7 @@ describe('AuditController', () => {
       });
 
       const result = await controller.audit(
-        { url: 'https://example.com' },
+        { url: 'https://www.example.com' },
         mockRequest as never,
       );
 
@@ -61,14 +61,20 @@ describe('AuditController', () => {
         audit: mockAuditResult,
       });
 
-      const result = await controller.audit({ url: 'https://example.com' }, mockRequest as never);
+      const result = await controller.audit(
+        { url: 'https://www.example.com' },
+        mockRequest as never,
+      );
       expect(result).toMatchObject({ cached: true, success: true });
     });
 
     it('returns QUEUE_FULL error when queue is full', async () => {
       auditServiceMock.auditUrl.mockRejectedValue(new QueueFullError('Queue is full'));
 
-      const result = await controller.audit({ url: 'https://example.com' }, mockRequest as never);
+      const result = await controller.audit(
+        { url: 'https://www.example.com' },
+        mockRequest as never,
+      );
       expect(result).toMatchObject({
         success: false,
         error: { code: ERROR_CODES.QUEUE_FULL },
@@ -78,7 +84,10 @@ describe('AuditController', () => {
     it('returns REQUEST_TIMEOUT error on audit timeout', async () => {
       auditServiceMock.auditUrl.mockRejectedValue(new AuditTimeoutError('Timed out'));
 
-      const result = await controller.audit({ url: 'https://example.com' }, mockRequest as never);
+      const result = await controller.audit(
+        { url: 'https://www.example.com' },
+        mockRequest as never,
+      );
       expect(result).toMatchObject({
         success: false,
         error: { code: ERROR_CODES.REQUEST_TIMEOUT },
@@ -89,7 +98,7 @@ describe('AuditController', () => {
       auditServiceMock.auditUrl.mockRejectedValue(new Error('Unexpected'));
 
       await expect(
-        controller.audit({ url: 'https://example.com' }, mockRequest as never),
+        controller.audit({ url: 'https://www.example.com' }, mockRequest as never),
       ).rejects.toThrow('Unexpected');
     });
   });
