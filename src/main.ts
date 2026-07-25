@@ -94,7 +94,7 @@ async function bootstrap(): Promise<void> {
   // ---------------------------------------------------------------------------
   // Swagger
   // ---------------------------------------------------------------------------
-  if (nodeEnv !== 'production') {
+  // if (nodeEnv !== 'production') {
     const config = new DocumentBuilder()
       .setTitle('Page Pulse — URL Audit Service')
       .setDescription(
@@ -113,7 +113,7 @@ async function bootstrap(): Promise<void> {
         displayRequestDuration: true,
       },
     });
-  }
+  // }
 
   // ---------------------------------------------------------------------------
   // Graceful shutdown

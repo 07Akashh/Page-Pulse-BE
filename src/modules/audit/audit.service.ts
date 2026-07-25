@@ -19,7 +19,7 @@ export class AuditService {
     private readonly configService: ConfigService,
   ) {
     this.log = this.loggerService.child('AuditService');
-    this.requestTimeout = this.configService.get<number>('http.REQUEST_TIMEOUT', 8_000);
+    this.requestTimeout = this.configService.get<number>('http.REQUEST_TIMEOUT', 20000);
   }
 
   public async auditUrl(
@@ -52,7 +52,7 @@ export class AuditService {
 
     if (!result) {
       throw new AuditTimeoutError(
-        `Audit for ${url} did not complete within ${this.requestTimeout}ms`,
+        `Audit for ${url} did not complete within ${this.requestTimeout + 10000}ms`,
       );
     }
 
@@ -68,10 +68,10 @@ export class AuditService {
     url: string,
     _jobId: string,
   ): Promise<AuditResult | null> {
-    const maxWaitMs = this.requestTimeout + 2_000;
+    const maxWaitMs = this.requestTimeout + 10000; // Increased buffer for queue processing
     const startTime = Date.now();
-    let pollInterval = 100;
-    const maxInterval = 1_000;
+    let pollInterval = 50;
+    const maxInterval = 500;
 
     while (Date.now() - startTime < maxWaitMs) {
       const result = await this.auditRepository.findCachedAudit(url);

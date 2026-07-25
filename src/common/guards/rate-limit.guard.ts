@@ -39,8 +39,8 @@ export class RateLimitGuard implements CanActivate {
     @Inject(CACHE_SERVICE) private readonly cacheService: ICacheService,
   ) {
     this.maxRequests = this.configService.get<number>('rateLimit.RATE_LIMIT_MAX', 100);
-    this.windowMs = this.configService.get<number>('rateLimit.RATE_LIMIT_WINDOW_MS', 3_600_000);
-    this.windowSeconds = Math.floor(this.windowMs / 1_000);
+    this.windowMs = this.configService.get<number>('rateLimit.RATE_LIMIT_WINDOW_MS', 3600000);
+    this.windowSeconds = Math.floor(this.windowMs / 1000);
   }
 
   public async canActivate(context: ExecutionContext): Promise<boolean> {

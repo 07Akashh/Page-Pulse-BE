@@ -22,6 +22,7 @@ export class QueueService implements OnModuleInit {
   private readonly queue: Queue;
   private readonly log: Logger;
   private readonly maxQueueSize: number;
+  private readonly connectTimeout: number;
 
   public constructor(
     private readonly configService: ConfigService,
@@ -30,27 +31,35 @@ export class QueueService implements OnModuleInit {
   ) {
     this.log = this.loggerService.child('QueueService');
     this.maxQueueSize = this.configService.get<number>('queue.QUEUE_MAX_SIZE', 500);
+    this.connectTimeout = this.configService.get<number>('redis.REDIS_CONNECT_TIMEOUT', 10000);
 
     const redisUrl = this.configService.get<string>('redis.REDIS_URL', 'redis://localhost:6379');
 
     this.queue = new Queue(QUEUE_NAME, {
       connection: {
         url: redisUrl,
+        connectTimeout: this.connectTimeout,
       },
       defaultJobOptions: {
-        removeOnComplete: { count: 1_000 },
-        removeOnFail: { age: 86_400 },
+        removeOnComplete: { count: 1000 },
+        removeOnFail: { age: 86400 },
         attempts: this.configService.get<number>('http.REQUEST_MAX_RETRIES', 3),
         backoff: {
           type: 'exponential',
-          delay: this.configService.get<number>('http.REQUEST_RETRY_BASE_DELAY', 1_000),
+          delay: this.configService.get<number>('http.REQUEST_RETRY_BASE_DELAY', 1000),
         },
       },
     });
   }
 
   public async onModuleInit(): Promise<void> {
-    this.log.info({ queue: QUEUE_NAME }, 'Queue initialized');
+    try {
+      await this.queue.waitUntilReady();
+      this.log.info({ queue: QUEUE_NAME }, 'Queue initialized and ready');
+    } catch (err) {
+      this.log.error({ err }, 'Failed to initialize queue - will retry automatically');
+      // Don't throw - BullMQ will retry connection automatically
+    }
   }
 
   public async dispatchAuditJob(

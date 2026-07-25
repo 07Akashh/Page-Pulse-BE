@@ -43,7 +43,7 @@ export class HealthService {
     return {
       status: allOk ? 'ok' : anyFail ? 'down' : 'degraded',
       timestamp: new Date().toISOString(),
-      uptime: Math.floor((Date.now() - this.startTime) / 1_000),
+      uptime: Math.floor((Date.now() - this.startTime) / 1000),
       checks: {
         redis: redisCheck,
         queue: queueCheck,

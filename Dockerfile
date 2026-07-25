@@ -38,7 +38,7 @@ COPY --chown=node:node --from=builder /usr/src/app/dist ./dist
 EXPOSE 3000
 
 # Health check probe
-HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=15s --timeout=10s --start-period=30s --retries=5 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
 
 # Start production server

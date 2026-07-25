@@ -118,7 +118,7 @@ export class MetricsService implements OnModuleInit {
   }
 
   public onModuleInit(): void {
-    setInterval(() => void this.refreshQueueMetrics(), 15_000);
+    setInterval(() => void this.refreshQueueMetrics(), 15000);
   }
 
   public async getMetrics(): Promise<string> {

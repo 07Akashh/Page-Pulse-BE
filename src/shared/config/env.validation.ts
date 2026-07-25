@@ -21,26 +21,27 @@ const envSchema = z.object({
   REDIS_URL: z.string().url('REDIS_URL must be a valid URL').default('redis://localhost:6379'),
   REDIS_HOST: z.string().min(1).default('localhost'),
   REDIS_PORT: z.coerce.number().int().positive().default(6379),
+  REDIS_CONNECT_TIMEOUT: z.coerce.number().int().positive().default(10000),
 
   // Cache
   CACHE_TTL: z.coerce.number().int().positive().default(300),
 
   // Rate Limiting
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
-  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(3_600_000),
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(3600000),
 
   // Queue
   QUEUE_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(20),
   QUEUE_MAX_SIZE: z.coerce.number().int().positive().default(500),
 
   // HTTP Client
-  REQUEST_TIMEOUT: z.coerce.number().int().positive().default(8_000),
+  REQUEST_TIMEOUT: z.coerce.number().int().positive().default(20000),
   REQUEST_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(3),
-  REQUEST_RETRY_BASE_DELAY: z.coerce.number().int().positive().default(1_000),
+  REQUEST_RETRY_BASE_DELAY: z.coerce.number().int().positive().default(1000),
 
   // Circuit Breaker
-  CIRCUIT_BREAKER_THRESHOLD: z.coerce.number().int().min(1).default(5),
-  CIRCUIT_BREAKER_TIMEOUT: z.coerce.number().int().positive().default(60_000),
+  CIRCUIT_BREAKER_THRESHOLD: z.coerce.number().int().min(1).default(10),
+  CIRCUIT_BREAKER_TIMEOUT: z.coerce.number().int().positive().default(30000),
 
   // Logging
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),

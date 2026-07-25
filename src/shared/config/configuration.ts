@@ -23,10 +23,11 @@ export const appConfig = registerAs(
 
 export const redisConfig = registerAs(
   'redis',
-  (): Pick<Env, 'REDIS_URL' | 'REDIS_HOST' | 'REDIS_PORT'> => ({
+  (): Pick<Env, 'REDIS_URL' | 'REDIS_HOST' | 'REDIS_PORT' | 'REDIS_CONNECT_TIMEOUT'> => ({
     REDIS_URL: process.env['REDIS_URL'] ?? 'redis://localhost:6379',
     REDIS_HOST: process.env['REDIS_HOST'] ?? 'localhost',
     REDIS_PORT: Number(process.env['REDIS_PORT'] ?? 6379),
+    REDIS_CONNECT_TIMEOUT: Number(process.env['REDIS_CONNECT_TIMEOUT'] ?? 10000),
   }),
 );
 
@@ -41,7 +42,7 @@ export const rateLimitConfig = registerAs(
   'rateLimit',
   (): Pick<Env, 'RATE_LIMIT_MAX' | 'RATE_LIMIT_WINDOW_MS'> => ({
     RATE_LIMIT_MAX: Number(process.env['RATE_LIMIT_MAX'] ?? 100),
-    RATE_LIMIT_WINDOW_MS: Number(process.env['RATE_LIMIT_WINDOW_MS'] ?? 3_600_000),
+    RATE_LIMIT_WINDOW_MS: Number(process.env['RATE_LIMIT_WINDOW_MS'] ?? 3600000),
   }),
 );
 
@@ -56,17 +57,17 @@ export const queueConfig = registerAs(
 export const httpConfig = registerAs(
   'http',
   (): Pick<Env, 'REQUEST_TIMEOUT' | 'REQUEST_MAX_RETRIES' | 'REQUEST_RETRY_BASE_DELAY'> => ({
-    REQUEST_TIMEOUT: Number(process.env['REQUEST_TIMEOUT'] ?? 8_000),
+    REQUEST_TIMEOUT: Number(process.env['REQUEST_TIMEOUT'] ?? 20000),
     REQUEST_MAX_RETRIES: Number(process.env['REQUEST_MAX_RETRIES'] ?? 3),
-    REQUEST_RETRY_BASE_DELAY: Number(process.env['REQUEST_RETRY_BASE_DELAY'] ?? 1_000),
+    REQUEST_RETRY_BASE_DELAY: Number(process.env['REQUEST_RETRY_BASE_DELAY'] ?? 1000),
   }),
 );
 
 export const circuitBreakerConfig = registerAs(
   'circuitBreaker',
   (): Pick<Env, 'CIRCUIT_BREAKER_THRESHOLD' | 'CIRCUIT_BREAKER_TIMEOUT'> => ({
-    CIRCUIT_BREAKER_THRESHOLD: Number(process.env['CIRCUIT_BREAKER_THRESHOLD'] ?? 5),
-    CIRCUIT_BREAKER_TIMEOUT: Number(process.env['CIRCUIT_BREAKER_TIMEOUT'] ?? 60_000),
+    CIRCUIT_BREAKER_THRESHOLD: Number(process.env['CIRCUIT_BREAKER_THRESHOLD'] ?? 10),
+    CIRCUIT_BREAKER_TIMEOUT: Number(process.env['CIRCUIT_BREAKER_TIMEOUT'] ?? 30000),
   }),
 );
 

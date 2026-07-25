@@ -10,6 +10,7 @@ export class CacheService implements ICacheService, OnModuleInit, OnModuleDestro
   private readonly redis: Redis;
   private readonly log: Logger;
   private readonly defaultTtl: number;
+  private readonly connectTimeout: number;
 
   private hitCount = 0;
   private missCount = 0;
@@ -20,6 +21,7 @@ export class CacheService implements ICacheService, OnModuleInit, OnModuleDestro
   ) {
     this.log = this.loggerService.child('CacheService');
     this.defaultTtl = this.configService.get<number>('cache.CACHE_TTL', 300);
+    this.connectTimeout = this.configService.get<number>('redis.REDIS_CONNECT_TIMEOUT', 10000);
 
     const redisUrl = this.configService.get<string>('redis.REDIS_URL', 'redis://localhost:6379');
 
@@ -29,13 +31,15 @@ export class CacheService implements ICacheService, OnModuleInit, OnModuleDestro
           this.log.error({ attempt: times }, 'Redis connection failed after max retries');
           return null;
         }
-        const delay = Math.min(times * 100, 3_000);
+        const delay = Math.min(times * 100, 3000);
         this.log.warn({ attempt: times, delayMs: delay }, 'Redis retry');
         return delay;
       },
       enableReadyCheck: true,
       maxRetriesPerRequest: 3,
       lazyConnect: true,
+      connectTimeout: this.connectTimeout,
+      commandTimeout: 5000, // 5 second command timeout
     });
 
     this.redis.on('error', (err: Error) => {
@@ -52,7 +56,13 @@ export class CacheService implements ICacheService, OnModuleInit, OnModuleDestro
   }
 
   public async onModuleInit(): Promise<void> {
-    await this.redis.connect();
+    try {
+      await this.redis.connect();
+      this.log.info('Redis connection established');
+    } catch (err) {
+      this.log.error({ err }, 'Failed to connect to Redis during initialization');
+      // Don't throw - allow app to start and retry connections
+    }
   }
 
   public async onModuleDestroy(): Promise<void> {
