@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { CORRELATION_ID_HEADER, ERROR_CODES } from '../constants';
-import type { LoggerService } from '../../shared/logger/logger.service';
+import { LoggerService } from '../../shared/logger/logger.service';
 
 /**
  * GlobalExceptionFilter — catches ALL unhandled exceptions.

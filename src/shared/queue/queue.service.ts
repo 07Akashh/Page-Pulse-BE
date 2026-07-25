@@ -31,8 +31,6 @@ export class QueueService implements OnModuleInit {
     this.log = this.loggerService.child('QueueService');
     this.maxQueueSize = this.configService.get<number>('queue.QUEUE_MAX_SIZE', 500);
 
-    // Reuse the existing Redis connection — BullMQ requires a separate connection
-    // per Queue/Worker (ioredis connection state machine conflict)
     const redisUrl = this.configService.get<string>('redis.REDIS_URL', 'redis://localhost:6379');
 
     this.queue = new Queue(QUEUE_NAME, {
@@ -40,9 +38,7 @@ export class QueueService implements OnModuleInit {
         url: redisUrl,
       },
       defaultJobOptions: {
-        // Remove completed jobs after 1000 (prevents Redis bloat)
         removeOnComplete: { count: 1_000 },
-        // Keep failed jobs for 24h for debugging
         removeOnFail: { age: 86_400 },
         attempts: this.configService.get<number>('http.REQUEST_MAX_RETRIES', 3),
         backoff: {
@@ -57,27 +53,20 @@ export class QueueService implements OnModuleInit {
     this.log.info({ queue: QUEUE_NAME }, 'Queue initialized');
   }
 
-  /**
-   * Dispatches an audit job.
-   *
-   * @returns jobId if dispatched, null if queue is full (caller should return 429)
-   */
   public async dispatchAuditJob(
     payload: AuditJobPayload,
     opts?: JobsOptions,
   ): Promise<string | null> {
-    // Backpressure check
     const waitingCount = await this.queue.getWaitingCount();
     if (waitingCount >= this.maxQueueSize) {
       this.log.warn({ waitingCount, maxQueueSize: this.maxQueueSize }, 'Queue is full');
       return null;
     }
 
-    // Deduplication: jobId based on URL hash ensures same URL isn't processed twice
     const jobId = this.buildJobId(payload.url);
 
     const job = await this.queue.add(AUDIT_JOB_NAME, payload, {
-      jobId, // BullMQ will ignore duplicate jobId if job is still in queue
+      jobId,
       ...opts,
     });
 
@@ -104,7 +93,6 @@ export class QueueService implements OnModuleInit {
 
   public async ping(): Promise<boolean> {
     try {
-      // BullMQ uses the same Redis — if CacheService Redis is alive, queue is alive
       return this.cacheService.ping();
     } catch {
       return false;
@@ -118,10 +106,9 @@ export class QueueService implements OnModuleInit {
 
   /**
    * Deterministic job ID from URL.
-   * Same URL → same ID → BullMQ deduplication handles the rest.
+   * Note: BullMQ custom jobId must NOT contain colons (:).
    */
   private buildJobId(url: string): string {
-    // Simple but sufficient — URL is already normalized by the validator
-    return `audit:${Buffer.from(url).toString('base64url')}`;
+    return `audit_${Buffer.from(url).toString('base64url')}`;
   }
 }
