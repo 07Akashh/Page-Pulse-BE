@@ -5,7 +5,7 @@ export interface AuditRequestDto {
   url: string;
 }
 
-/** The full audit response envelope */
+/** The full audit response envelope — success case only */
 export interface AuditResponseDto {
   success: true;
   requestId: string;
@@ -13,13 +13,8 @@ export interface AuditResponseDto {
   audit: AuditResult;
 }
 
-/** The API error envelope — returned by GlobalExceptionFilter */
-export interface AuditErrorResponseDto {
-  success: false;
-  requestId: string;
-  error: {
-    code: string;
-    message: string;
-    details?: unknown;
-  };
-}
+/**
+ * NOTE: Error responses are handled by GlobalExceptionFilter.
+ * Controllers should THROW HttpException, not return error objects with 200 status.
+ * This ensures proper HTTP status codes (429, 504, 400, 500, etc.)
+ */

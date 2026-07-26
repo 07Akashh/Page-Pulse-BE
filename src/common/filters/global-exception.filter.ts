@@ -5,25 +5,27 @@ import type {
 import {
   Catch,
   HttpException,
-  HttpStatus,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { CORRELATION_ID_HEADER, ERROR_CODES } from '../constants';
+import { CORRELATION_ID_HEADER, ERROR_CODES, HTTP_STATUS } from '../constants';
+import { formatError } from '../utils/response.util';
+import { DomainException } from '../exceptions/domain.exception';
 import { LoggerService } from '../../shared/logger/logger.service';
 
 /**
- * GlobalExceptionFilter — catches ALL unhandled exceptions.
+ * GlobalExceptionFilter — catches ALL unhandled exceptions and formats responses.
  *
- * Contract: NEVER expose stack traces or internal error details.
- * Every error response has the same envelope shape.
+ * CRITICAL RULES:
+ * 1. NEVER return errors with HTTP 200 status code
+ * 2. Use correct HTTP status codes (429, 504, 400, 500, etc.)
+ * 3. NEVER expose stack traces, internal details, or sensitive info
+ * 4. All errors returned via GlobalExceptionFilter follow structured format
  *
  * Handles:
- * 1. HttpException (from guards, pipes, explicit throws)
- * 2. ZodError (if somehow bypasses the pipe — belt-and-suspenders)
- * 3. Any unknown Error
+ * 1. HttpException (from guards, pipes, custom handlers)
+ * 2. Any unknown Error (generic 500)
  *
- * Security note: error.message from unknown errors is NOT forwarded —
- * it might contain file paths, DB queries, or internal hostnames.
+ * Security: error.message from unknown errors is NOT forwarded to client.
  */
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
@@ -35,49 +37,70 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     const res = ctx.getResponse<Response>();
 
     const requestId =
-      (req.headers[CORRELATION_ID_HEADER] as string | undefined) ?? '';
+      (req.headers[CORRELATION_ID_HEADER] as string | undefined) ?? 'unknown';
 
-    const { status, code, message } = this.classify(exception);
+    const { status, code, message, details } = this.classify(exception);
 
-    // Log the full error internally (including stack trace — just not in the response)
+    // Log full context internally (NOT sent to client)
+    const logMsg = `[${req.method} ${req.path}] ${message} (code: ${code})`;
+
     if (status >= 500) {
       this.logger.error(
-        `Unhandled exception: ${message}`,
+        logMsg,
         exception instanceof Error ? exception.stack : undefined,
         'GlobalExceptionFilter',
       );
-    } else {
-      this.logger.warn(message, 'GlobalExceptionFilter');
+    } else if (status >= 400) {
+      this.logger.warn(logMsg, 'GlobalExceptionFilter');
     }
 
-    // If the HttpException body already has our structured format, pass it through
-    if (exception instanceof HttpException) {
-      const body = exception.getResponse();
-      if (
-        typeof body === 'object' &&
-        body !== null &&
-        'success' in body &&
-        (body as Record<string, unknown>)['success'] === false
-      ) {
-        res.status(status).json({ ...body, requestId });
-        return;
-      }
-    }
+    // Format and send structured error response
+    const errorBody = formatError(requestId, code, message, details);
 
-    res.status(status).json({
-      success: false,
-      requestId,
-      error: { code, message },
-    });
+    res.status(status).json(errorBody);
   }
 
   private classify(exception: unknown): {
     status: number;
-    code: string;
+    code: typeof ERROR_CODES[keyof typeof ERROR_CODES];
     message: string;
+    details?: unknown;
   } {
+    // Domain exceptions (business logic errors)
+    if (exception instanceof DomainException) {
+      return {
+        status: exception.statusCode,
+        code: exception.code,
+        message: exception.message,
+        details: exception.details,
+      };
+    }
+
+    // HttpException with structured body (from controllers)
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
+      const response = exception.getResponse();
+
+      // If already formatted by controller, extract info
+      if (
+        typeof response === 'object' &&
+        response !== null &&
+        'error' in response
+      ) {
+        const errorResponse = response as Record<string, unknown>;
+        const errorObj = errorResponse['error'] as Record<string, unknown> | undefined;
+        if (errorObj && 'code' in errorObj) {
+          return {
+            status,
+            code: (errorObj.code as typeof ERROR_CODES[keyof typeof ERROR_CODES]) ||
+              ERROR_CODES.INTERNAL_ERROR,
+            message: (errorObj.message as string) || exception.message,
+            details: errorObj.details,
+          };
+        }
+      }
+
+      // Map HttpException to error code based on status
       return {
         status,
         code: this.statusToCode(status),
@@ -85,20 +108,22 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       };
     }
 
-    // Unknown error — return generic 500, never leak internals
+    // Unknown error — never leak stack trace or internals
     return {
-      status: HttpStatus.INTERNAL_SERVER_ERROR,
+      status: HTTP_STATUS.INTERNAL_SERVER_ERROR,
       code: ERROR_CODES.INTERNAL_ERROR,
       message: 'An unexpected error occurred. Please try again later.',
     };
   }
 
-  private statusToCode(status: number): string {
-    const map: Record<number, string> = {
-      400: ERROR_CODES.VALIDATION_ERROR,
-      429: ERROR_CODES.RATE_LIMIT_EXCEEDED,
-      503: ERROR_CODES.SERVICE_UNAVAILABLE,
-      504: ERROR_CODES.REQUEST_TIMEOUT,
+  private statusToCode(
+    status: number,
+  ): typeof ERROR_CODES[keyof typeof ERROR_CODES] {
+    const map: Record<number, typeof ERROR_CODES[keyof typeof ERROR_CODES]> = {
+      [HTTP_STATUS.BAD_REQUEST]: ERROR_CODES.VALIDATION_ERROR,
+      [HTTP_STATUS.TOO_MANY_REQUESTS]: ERROR_CODES.RATE_LIMIT_EXCEEDED,
+      [HTTP_STATUS.SERVICE_UNAVAILABLE]: ERROR_CODES.SERVICE_UNAVAILABLE,
+      [HTTP_STATUS.GATEWAY_TIMEOUT]: ERROR_CODES.REQUEST_TIMEOUT,
     };
     return map[status] ?? ERROR_CODES.INTERNAL_ERROR;
   }

@@ -1,20 +1,21 @@
 import { Controller, Post, Body, HttpCode, HttpStatus, Req, UsePipes } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import type { Request } from 'express';
-import { AuditService, QueueFullError, AuditTimeoutError } from './audit.service';
+import { AuditService } from './audit.service';
 import { auditRequestSchema } from './validators/url.validator';
 import { ZodValidationPipe } from '../../common/guards/zod-validation.pipe';
-import { CORRELATION_ID_HEADER, ERROR_CODES } from '../../common/constants';
-import type { AuditResponseDto, AuditErrorResponseDto } from './dto/audit.dto';
+import { CORRELATION_ID_HEADER } from '../../common/constants';
+import type { AuditResponseDto } from './dto/audit.dto';
 
 /**
- * AuditController — thin HTTP adapter layer.
+ * AuditController — HTTP adapter layer with production-grade error handling.
  *
- * Rules enforced here:
- * - No business logic — only coordinate between HTTP and AuditService
- * - No direct Redis/BullMQ access
- * - Structured error responses for domain errors (QueueFull, Timeout)
+ * Rules:
+ * - No business logic — thin adapter between HTTP and AuditService
+ * - All domain errors THROW proper HTTP exceptions (never return errors with 200 status)
  * - All input validated by ZodValidationPipe before handler runs
+ * - GlobalExceptionFilter catches all exceptions and formats responses
+ * - Request ID injected into all responses for tracing
  */
 @ApiTags('audit')
 @Controller({ path: 'audit', version: '1' })
@@ -65,39 +66,15 @@ export class AuditController {
   })
   @ApiResponse({ status: 400, description: 'Invalid URL' })
   @ApiResponse({ status: 429, description: 'Queue full or rate limit exceeded' })
+  @ApiResponse({ status: 504, description: 'Request timeout' })
+  @ApiResponse({ status: 500, description: 'Internal server error' })
   public async audit(
     @Body() body: { url: string },
     @Req() req: Request,
-  ): Promise<AuditResponseDto | AuditErrorResponseDto> {
+  ): Promise<AuditResponseDto> {
     const requestId = (req.headers[CORRELATION_ID_HEADER] as string | undefined) ?? '';
-
-    try {
-      return await this.auditService.auditUrl(body.url, requestId);
-    } catch (err) {
-      if (err instanceof QueueFullError) {
-        return {
-          success: false,
-          requestId,
-          error: {
-            code: ERROR_CODES.QUEUE_FULL,
-            message: err.message,
-          },
-        } satisfies AuditErrorResponseDto;
-      }
-
-      if (err instanceof AuditTimeoutError) {
-        return {
-          success: false,
-          requestId,
-          error: {
-            code: ERROR_CODES.REQUEST_TIMEOUT,
-            message: err.message,
-          },
-        } satisfies AuditErrorResponseDto;
-      }
-
-      // Re-throw — GlobalExceptionFilter handles the rest
-      throw err;
-    }
+    // All exceptions are handled by GlobalExceptionFilter, which converts them to proper HTTP responses
+    // Errors are thrown by AuditService and caught globally — no error handling needed here
+    return this.auditService.auditUrl(body.url, requestId);
   }
 }

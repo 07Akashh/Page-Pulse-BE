@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { AuditResult } from '../../common/types';
+import { QueueFullException, AuditTimeoutException } from '../../common/exceptions/domain.exception';
 import { AuditRepository } from './audit.repository';
 import { QueueService } from '../../shared/queue/queue.service';
 import { LoggerService } from '../../shared/logger/logger.service';
@@ -48,7 +49,7 @@ export class AuditService {
 
     if (!jobId) {
       this.log.error({ url }, 'Queue is full');
-      throw new QueueFullError('Queue at capacity — retry shortly');
+      throw new QueueFullException();
     }
 
     this.log.info({ requestId, jobId, dispatchMs: Date.now() - serviceStartTime }, 'Job dispatched');
@@ -59,7 +60,7 @@ export class AuditService {
     if (!result) {
       const totalMs = Date.now() - serviceStartTime;
       this.log.error({ url, totalMs }, 'Audit timeout');
-      throw new AuditTimeoutError(`Audit timeout after ${totalMs}ms`);
+      throw new AuditTimeoutException(`Audit did not complete within ${totalMs}ms`);
     }
 
     const totalMs = Date.now() - serviceStartTime;
@@ -154,19 +155,5 @@ export class AuditService {
         }
       }, 10000); // Reduced from 35s to 10s
     });
-  }
-}
-
-export class QueueFullError extends Error {
-  public constructor(message: string) {
-    super(message);
-    this.name = 'QueueFullError';
-  }
-}
-
-export class AuditTimeoutError extends Error {
-  public constructor(message: string) {
-    super(message);
-    this.name = 'AuditTimeoutError';
   }
 }
