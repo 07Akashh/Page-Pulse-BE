@@ -74,52 +74,75 @@ export class AuditService {
   ): Promise<AuditResult | null> {
     return new Promise((resolve) => {
       const startTime = Date.now();
-      let checkInterval: NodeJS.Timeout | null = null;
-      let timeoutHandle: NodeJS.Timeout | null = null;
+      let checkInterval: NodeJS.Timeout | undefined;
+      let slowPollInterval: NodeJS.Timeout | undefined;
+      let timeoutHandle: NodeJS.Timeout | undefined;
+      let resolved = false;
 
       // Event listener for job completion
       const onAuditComplete = (data: { url: string; result: AuditResult }) => {
-        if (data.url === url) {
+        if (data.url === url && !resolved) {
+          resolved = true;
           cleanup();
-          this.log.debug({ jobId, url }, 'Audit job completed via event');
+          this.log.debug({ jobId, url }, 'Audit completed via event');
           resolve(data.result);
         }
       };
 
       const cleanup = () => {
         if (checkInterval) clearInterval(checkInterval);
+        if (slowPollInterval) clearInterval(slowPollInterval);
         if (timeoutHandle) clearTimeout(timeoutHandle);
         this.eventEmitter.off('audit.completed', onAuditComplete);
       };
 
-      // Subscribe to job completion event
+      // Subscribe to job completion event FIRST (before polling starts)
       this.eventEmitter.on('audit.completed', onAuditComplete);
 
-      // Fallback: Periodic polling (cheaper than continuous polling)
+      // Aggressive polling for fast responses (first 2 seconds)
+      let pollCount = 0;
       checkInterval = setInterval(async () => {
+        if (resolved) return;
+        
         const result = await this.auditRepository.findCachedAudit(url);
-        if (result) {
+        if (result && !resolved) {
+          resolved = true;
           cleanup();
-          this.log.debug({ jobId, url }, 'Audit job completed via fallback polling');
+          this.log.debug({ jobId, url, pollCount }, 'Audit completed via polling');
           resolve(result);
         }
-      }, 1000); // Check every 1 second instead of aggressive polling
+        
+        pollCount++;
+        // First 2 seconds: poll every 100ms (20 times)
+        // After: switch to slower 500ms polling
+        if (pollCount === 20) {
+          if (checkInterval) clearInterval(checkInterval);
+          slowPollInterval = setInterval(async () => {
+            if (resolved) return;
+            const result = await this.auditRepository.findCachedAudit(url);
+            if (result && !resolved) {
+              resolved = true;
+              cleanup();
+              resolve(result);
+            }
+          }, 500);
+        }
+      }, 100);
 
       // Hard timeout
       timeoutHandle = setTimeout(() => {
-        cleanup();
-        this.log.warn(
-          { jobId, url, elapsedMs: Date.now() - startTime },
-          'Audit job wait timeout',
-        );
-        resolve(null);
+        if (!resolved) {
+          resolved = true;
+          cleanup();
+          this.log.warn(
+            { jobId, url, elapsedMs: Date.now() - startTime },
+            'Audit wait timeout',
+          );
+          resolve(null);
+        }
       }, this.maxWaitMs);
     });
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export class QueueFullError extends Error {
