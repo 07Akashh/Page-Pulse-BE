@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, Req, UsePipes } from '@nestjs/common';
+import { Controller, Post, Body, Req, UsePipes } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { AuditService } from './audit.service';
@@ -23,7 +23,6 @@ export class AuditController {
   public constructor(private readonly auditService: AuditService) {}
 
   @Post()
-  @HttpCode(HttpStatus.OK)
   @UsePipes(new ZodValidationPipe(auditRequestSchema))
   @ApiOperation({
     summary: 'Audit a URL',

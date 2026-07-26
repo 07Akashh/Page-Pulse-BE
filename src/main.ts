@@ -8,6 +8,7 @@ import compression from 'compression';
 import pinoHttp from 'pino-http';
 import { AppModule } from './app.module';
 import { LoggerService } from './shared/logger/logger.service';
+import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { CORRELATION_ID_HEADER } from './common/constants';
 
 async function bootstrap(): Promise<void> {
@@ -21,6 +22,9 @@ async function bootstrap(): Promise<void> {
 
   // Use our Pino logger for NestJS internal logs
   app.useLogger(loggerService);
+
+  // Register global exception filter — MUST be before other middleware
+  app.useGlobalFilters(new GlobalExceptionFilter(loggerService));
 
   const port = configService.get<number>('app.PORT', 3000);
   const nodeEnv = configService.get<string>('app.NODE_ENV', 'development');
