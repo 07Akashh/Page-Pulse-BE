@@ -49,26 +49,38 @@ export class AuditProcessor implements OnModuleInit, OnModuleDestroy {
         connection: {
           url: redisUrl,
           connectTimeout: this.connectTimeout,
+          retryStrategy: (times: number) => {
+            const delay = Math.min(times * 100, 3000);
+            this.log.warn({ attempt: times, delayMs: delay }, 'Worker reconnecting');
+            return delay;
+          },
         },
         concurrency: this.concurrency,
-        removeOnComplete: { count: 1000 },
-        removeOnFail: { age: 86400 },
+        removeOnComplete: { count: 1000 }, // Keep only last 1000
+        removeOnFail: { age: 3600 }, // Keep 1 hour for debugging
+        lockDuration: 5000, // Lock timeout (fast fail on hangs)
+        lockRenewTime: 2000, // Renew every 2s
+        maxStalledCount: 1, // Fail after 1 stall
       },
     );
 
     this.worker.on('completed', (job) => {
-      this.log.info({ jobId: job.id, url: job.data.url }, 'Audit job completed');
+      this.log.debug({ jobId: job.id, url: job.data.url }, 'Job completed handler fired');
     });
 
     this.worker.on('failed', (job, err) => {
       this.log.error(
-        { jobId: job?.id, url: job?.data.url, err },
-        'Audit job failed',
+        { jobId: job?.id, url: job?.data.url, errorName: err.name, errorMsg: err.message },
+        'Job failed',
       );
     });
 
     this.worker.on('error', (err) => {
-      this.log.error({ err }, 'Worker error');
+      this.log.error({ errorName: err.name, errorMsg: err.message }, 'Worker error');
+    });
+
+    this.worker.on('stalled', (jobId) => {
+      this.log.warn({ jobId }, 'Job stalled — likely timeout');
     });
 
     this.log.info({ concurrency: this.concurrency }, 'Audit worker started');
@@ -81,24 +93,33 @@ export class AuditProcessor implements OnModuleInit, OnModuleDestroy {
 
   private async process(job: Job<AuditJobPayload>): Promise<void> {
     const { url, requestId } = job.data;
-    const startTime = Date.now();
+    const jobStartTime = Date.now();
 
-    this.log.info({ jobId: job.id, requestId, url, attempt: job.attemptsMade }, 'Processing audit job');
+    this.log.info(
+      { jobId: job.id, requestId, url, attempt: job.attemptsMade, timestamp: new Date().toISOString() },
+      'Worker picked up job',
+    );
 
     try {
-      // const hostname = new URL(url).hostname;
-      // const circuitBreaker = this.getCircuitBreaker(hostname); // Temporarily disabled
-
       let auditResult: AuditResult;
 
       try {
-        // Temporarily disable circuit breaker to debug
+        const fetchStartTime = Date.now();
+        this.log.debug({ jobId: job.id, url }, 'Starting HTTP fetch');
+
         const fetchResult = await httpFetch(url, {
           timeoutMs: this.requestTimeout,
           maxRetries: this.maxRetries,
           retryBaseDelayMs: this.retryBaseDelay,
         });
 
+        const fetchElapsedMs = Date.now() - fetchStartTime;
+        this.log.debug(
+          { jobId: job.id, url, fetchElapsedMs, statusCode: fetchResult.statusCode },
+          'HTTP fetch completed',
+        );
+
+        const parseStartTime = Date.now();
         auditResult = {
           title: extractTitle(fetchResult.body),
           description: extractDescription(fetchResult.body),
@@ -113,43 +134,34 @@ export class AuditProcessor implements OnModuleInit, OnModuleDestroy {
           redirectChain: fetchResult.redirectChain,
           finalUrl: fetchResult.finalUrl,
         };
+        const parseElapsedMs = Date.now() - parseStartTime;
+        this.log.debug({ jobId: job.id, parseElapsedMs }, 'HTML parsing completed');
       } catch (err) {
-        // Circuit breaker temporarily disabled
-        // if (err instanceof CircuitBreakerError) {
-        //   this.log.warn(
-        //     { jobId: job.id, url, resetInMs: err.resetInMs },
-        //     'Circuit breaker open — fast failing audit',
-        //   );
-        //   auditResult = {
-        //     title: '',
-        //     description: '',
-        //     statusCode: 503,
-        //     responseTime: Date.now() - startTime,
-        //     contentLength: 0,
-        //     headers: {},
-        //     https: url.startsWith('https://'),
-        //     reachable: false,
-        //   };
-        // } else {
-          const isTimeout = err instanceof HttpTimeoutError || (err instanceof Error && err.name === 'AbortError');
-          const elapsed = Date.now() - startTime;
+        const isTimeout = err instanceof HttpTimeoutError || (err instanceof Error && err.name === 'AbortError');
+        const errorElapsedMs = Date.now() - jobStartTime;
 
-          this.log.warn({ jobId: job.id, url, isTimeout, err }, 'HTTP fetch failed during audit — recording unreachable result');
+        this.log.warn(
+          { jobId: job.id, url, isTimeout, errorElapsedMs, errorMsg: err instanceof Error ? err.message : String(err) },
+          'HTTP fetch failed',
+        );
 
-          auditResult = {
-            title: '',
-            description: '',
-            statusCode: isTimeout ? 504 : 0,
-            responseTime: elapsed,
-            contentLength: 0,
-            headers: {},
-            https: url.startsWith('https://'),
-            reachable: false,
-          };
-        // }
+        auditResult = {
+          title: '',
+          description: '',
+          statusCode: isTimeout ? 504 : 0,
+          responseTime: errorElapsedMs,
+          contentLength: 0,
+          headers: {},
+          https: url.startsWith('https://'),
+          reachable: false,
+        };
       }
 
+      const cacheStartTime = Date.now();
       await this.auditRepository.cacheAudit(url, auditResult);
+      const cacheElapsedMs = Date.now() - cacheStartTime;
+
+      const totalElapsedMs = Date.now() - jobStartTime;
 
       this.log.info(
         {
@@ -158,19 +170,31 @@ export class AuditProcessor implements OnModuleInit, OnModuleDestroy {
           url,
           statusCode: auditResult.statusCode,
           reachable: auditResult.reachable,
-          responseTimeMs: Date.now() - startTime,
+          cacheElapsedMs,
+          totalElapsedMs,
+          timestamp: new Date().toISOString(),
         },
-        'Audit completed',
+        'Audit job completed',
       );
 
-      // Emit event to notify waiting requests
+      // Emit event to notify all waiting requests
       this.eventEmitter.emit('audit.completed', {
         url,
         result: auditResult,
         jobId: job.id,
       });
     } catch (fatalErr) {
-      this.log.error({ jobId: job.id, requestId, url, fatalErr }, 'Fatal audit worker error');
+      const totalElapsedMs = Date.now() - jobStartTime;
+      this.log.error(
+        {
+          jobId: job.id,
+          requestId,
+          url,
+          totalElapsedMs,
+          errorMsg: fatalErr instanceof Error ? fatalErr.message : String(fatalErr),
+        },
+        'Fatal job error',
+      );
       throw fatalErr;
     }
   }

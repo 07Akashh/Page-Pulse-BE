@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { AuditResult } from '../../common/types';
 import { AuditRepository } from './audit.repository';
@@ -11,28 +10,26 @@ import type { AuditResponseDto } from './dto/audit.dto';
 @Injectable()
 export class AuditService {
   private readonly log: Logger;
-  private readonly requestTimeout: number;
-  private readonly maxWaitMs: number;
 
   public constructor(
     private readonly auditRepository: AuditRepository,
     private readonly queueService: QueueService,
     private readonly loggerService: LoggerService,
-    private readonly configService: ConfigService,
     private readonly eventEmitter: EventEmitter2,
   ) {
     this.log = this.loggerService.child('AuditService');
-    this.requestTimeout = this.configService.get<number>('http.REQUEST_TIMEOUT', 20000);
-    this.maxWaitMs = this.requestTimeout + 15000; // Buffer for queue + processing
   }
 
   public async auditUrl(
     url: string,
     requestId: string,
   ): Promise<AuditResponseDto> {
+    const serviceStartTime = Date.now();
+
+    // Check cache first
     const cached = await this.auditRepository.findCachedAudit(url);
     if (cached) {
-      this.log.info({ requestId, url }, 'Cache hit — returning cached audit');
+      this.log.info({ requestId, url, cacheCheckMs: Date.now() - serviceStartTime }, 'Cache hit');
       return {
         success: true,
         requestId,
@@ -41,7 +38,8 @@ export class AuditService {
       };
     }
 
-    this.log.info({ requestId, url }, 'Cache miss — dispatching audit job');
+    // Dispatch new job
+    this.log.info({ requestId, url }, 'Cache miss — dispatching job');
     const jobId = await this.queueService.dispatchAuditJob({
       url,
       requestId,
@@ -49,16 +47,23 @@ export class AuditService {
     });
 
     if (!jobId) {
-      throw new QueueFullError('Audit queue is at capacity. Please retry shortly.');
+      this.log.error({ url }, 'Queue is full');
+      throw new QueueFullError('Queue at capacity — retry shortly');
     }
 
-    const result = await this.waitForResult(url, jobId);
+    this.log.info({ requestId, jobId, dispatchMs: Date.now() - serviceStartTime }, 'Job dispatched');
+
+    // Wait for result
+    const result = await this.waitForResult(url, jobId, requestId);
 
     if (!result) {
-      throw new AuditTimeoutError(
-        `Audit for ${url} did not complete within ${this.maxWaitMs}ms`,
-      );
+      const totalMs = Date.now() - serviceStartTime;
+      this.log.error({ url, totalMs }, 'Audit timeout');
+      throw new AuditTimeoutError(`Audit timeout after ${totalMs}ms`);
     }
+
+    const totalMs = Date.now() - serviceStartTime;
+    this.log.info({ requestId, url, totalMs }, 'Audit completed');
 
     return {
       success: true,
@@ -71,11 +76,11 @@ export class AuditService {
   private async waitForResult(
     url: string,
     jobId: string,
+    requestId: string,
   ): Promise<AuditResult | null> {
     return new Promise((resolve) => {
       const startTime = Date.now();
       let checkInterval: NodeJS.Timeout | undefined;
-      let slowPollInterval: NodeJS.Timeout | undefined;
       let timeoutHandle: NodeJS.Timeout | undefined;
       let resolved = false;
 
@@ -84,40 +89,46 @@ export class AuditService {
         if (data.url === url && !resolved) {
           resolved = true;
           cleanup();
-          this.log.debug({ jobId, url }, 'Audit completed via event');
+          const elapsedMs = Date.now() - startTime;
+          this.log.debug(
+            { jobId, url, elapsedMs, source: 'event' },
+            'Result resolved',
+          );
           resolve(data.result);
         }
       };
 
       const cleanup = () => {
         if (checkInterval) clearInterval(checkInterval);
-        if (slowPollInterval) clearInterval(slowPollInterval);
         if (timeoutHandle) clearTimeout(timeoutHandle);
         this.eventEmitter.off('audit.completed', onAuditComplete);
       };
 
-      // Subscribe to job completion event FIRST (before polling starts)
+      // Subscribe to job completion event FIRST
       this.eventEmitter.on('audit.completed', onAuditComplete);
 
-      // Aggressive polling for fast responses (first 2 seconds)
+      // Aggressive polling: every 50ms for instant cache detection
       let pollCount = 0;
       checkInterval = setInterval(async () => {
         if (resolved) return;
-        
+
         const result = await this.auditRepository.findCachedAudit(url);
         if (result && !resolved) {
           resolved = true;
           cleanup();
-          this.log.debug({ jobId, url, pollCount }, 'Audit completed via polling');
+          this.log.debug(
+            { jobId, url, pollCount, elapsedMs: Date.now() - startTime, source: 'poll' },
+            'Result resolved',
+          );
           resolve(result);
+          return;
         }
-        
+
         pollCount++;
-        // First 2 seconds: poll every 100ms (20 times)
-        // After: switch to slower 500ms polling
-        if (pollCount === 20) {
+        // After 10 seconds of polling, back off to 500ms
+        if (pollCount === 200) {
           if (checkInterval) clearInterval(checkInterval);
-          slowPollInterval = setInterval(async () => {
+          checkInterval = setInterval(async () => {
             if (resolved) return;
             const result = await this.auditRepository.findCachedAudit(url);
             if (result && !resolved) {
@@ -127,20 +138,21 @@ export class AuditService {
             }
           }, 500);
         }
-      }, 100);
+      }, 50); // Aggressive: 50ms polls
 
-      // Hard timeout
+      // Hard timeout: 10 seconds max
       timeoutHandle = setTimeout(() => {
         if (!resolved) {
           resolved = true;
           cleanup();
+          const elapsedMs = Date.now() - startTime;
           this.log.warn(
-            { jobId, url, elapsedMs: Date.now() - startTime },
-            'Audit wait timeout',
+            { jobId, url, requestId, elapsedMs },
+            'Result wait timeout',
           );
           resolve(null);
         }
-      }, this.maxWaitMs);
+      }, 10000); // Reduced from 35s to 10s
     });
   }
 }
