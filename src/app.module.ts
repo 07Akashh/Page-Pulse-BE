@@ -1,5 +1,6 @@
 import { Module, type MiddlewareConsumer, type NestModule, type RequestMethod } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 
 // Shared modules (global)
 import { ConfigModule } from './shared/config/config.module';
@@ -34,6 +35,7 @@ import { CorrelationIdMiddleware } from './common/middlewares/correlation-id.mid
     LoggerModule,   // Second — everything logs
     CacheModule,    // Third — rate limit guard needs this
     QueueModule,    // Fourth — audit module needs this
+    EventEmitterModule.forRoot(),  // Event bus for job completions
 
     // Feature modules
     AuditModule,

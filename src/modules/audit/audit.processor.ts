@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Worker, type Job } from 'bullmq';
 import { AuditRepository } from './audit.repository';
 import { LoggerService } from '../../shared/logger/logger.service';
@@ -26,6 +27,7 @@ export class AuditProcessor implements OnModuleInit, OnModuleDestroy {
     private readonly auditRepository: AuditRepository,
     private readonly loggerService: LoggerService,
     private readonly configService: ConfigService,
+    private readonly eventEmitter: EventEmitter2,
   ) {
     this.log = this.loggerService.child('AuditProcessor');
     this.concurrency = this.configService.get<number>('queue.QUEUE_CONCURRENCY', 20);
@@ -160,6 +162,13 @@ export class AuditProcessor implements OnModuleInit, OnModuleDestroy {
         },
         'Audit completed',
       );
+
+      // Emit event to notify waiting requests
+      this.eventEmitter.emit('audit.completed', {
+        url,
+        result: auditResult,
+        jobId: job.id,
+      });
     } catch (fatalErr) {
       this.log.error({ jobId: job.id, requestId, url, fatalErr }, 'Fatal audit worker error');
       throw fatalErr;
