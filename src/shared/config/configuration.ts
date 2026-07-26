@@ -57,9 +57,12 @@ export const queueConfig = registerAs(
 export const httpConfig = registerAs(
   'http',
   (): Pick<Env, 'REQUEST_TIMEOUT' | 'REQUEST_MAX_RETRIES' | 'REQUEST_RETRY_BASE_DELAY'> => ({
-    REQUEST_TIMEOUT: Number(process.env['REQUEST_TIMEOUT'] ?? 20000),
-    REQUEST_MAX_RETRIES: Number(process.env['REQUEST_MAX_RETRIES'] ?? 3),
-    REQUEST_RETRY_BASE_DELAY: Number(process.env['REQUEST_RETRY_BASE_DELAY'] ?? 1000),
+    // Note: httpFetch caps these values internally to prevent slow requests
+    // REQUEST_TIMEOUT is capped at 5000ms per attempt
+    // REQUEST_MAX_RETRIES is capped at 1 (only retry on network errors, not timeout)
+    REQUEST_TIMEOUT: Number(process.env['REQUEST_TIMEOUT'] ?? 5000),
+    REQUEST_MAX_RETRIES: Number(process.env['REQUEST_MAX_RETRIES'] ?? 1),
+    REQUEST_RETRY_BASE_DELAY: Number(process.env['REQUEST_RETRY_BASE_DELAY'] ?? 200),
   }),
 );
 

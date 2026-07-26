@@ -4,8 +4,8 @@ import { USER_AGENT } from '../constants';
 
 /**
  * Production HTTP client with:
- * 1. AbortController-based timeout (configurable, default 8s)
- * 2. Exponential backoff retry (configurable attempts + base delay)
+ * 1. AbortController-based timeout (tight limits: 5s total, 2s per connection attempt)
+ * 2. Single retry only on network errors (no retry on timeout)
  * 3. Redirect chain tracking
  * 4. Structured result — no throwing on non-2xx
  */
@@ -15,19 +15,24 @@ export async function httpFetch(
   options: HttpClientOptions,
 ): Promise<HttpFetchResult> {
   const { timeoutMs, maxRetries, retryBaseDelayMs } = options;
+  
+  // Cap timeouts to prevent slow requests
+  const effectiveTimeout = Math.min(timeoutMs, 5000); // Max 5 seconds per attempt
+  const effectiveRetries = Math.min(maxRetries, 1);   // Max 1 retry
 
   let lastError: Error | null = null;
   const redirectChain: string[] = [];
   let finalUrl = url;
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  for (let attempt = 0; attempt <= effectiveRetries; attempt++) {
+    // Only wait on retry if it's a retryable error (not timeout)
     if (attempt > 0) {
-      const delay = retryBaseDelayMs * Math.pow(2, attempt - 1);
+      const delay = Math.min(retryBaseDelayMs * attempt, 500); // Max 500ms backoff
       await sleep(delay);
     }
 
     const controller = new AbortController();
-    const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+    const timeoutHandle = setTimeout(() => controller.abort(), effectiveTimeout);
 
     const startTime = Date.now();
 
@@ -49,35 +54,47 @@ export async function httpFetch(
       const responseTimeMs = Date.now() - startTime;
       finalUrl = response.url || url;
 
-      // Read body
-      const body = await response.text();
+      // Read body with separate timeout to prevent hanging reads
+      const bodyController = new AbortController();
+      const bodyTimeoutHandle = setTimeout(() => bodyController.abort(), 2000);
+      
+      try {
+        const body = await response.text();
+        
+        // Flatten response headers
+        const headers: Record<string, string> = {};
+        response.headers.forEach((value, key) => {
+          headers[key] = value;
+        });
 
-      // Flatten response headers
-      const headers: Record<string, string> = {};
-      response.headers.forEach((value, key) => {
-        headers[key] = value;
-      });
-
-      return {
-        statusCode: response.status,
-        headers,
-        body,
-        responseTimeMs,
-        finalUrl,
-        redirectChain,
-      };
+        return {
+          statusCode: response.status,
+          headers,
+          body,
+          responseTimeMs,
+          finalUrl,
+          redirectChain,
+        };
+      } finally {
+        clearTimeout(bodyTimeoutHandle);
+      }
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
 
       const isTimeout = lastError.name === 'AbortError';
-      const isLastAttempt = attempt === maxRetries;
+      const isLastAttempt = attempt === effectiveRetries;
 
-      if (isTimeout || isLastAttempt) {
-        throw isTimeout
-          ? new HttpTimeoutError(`Request to ${url} timed out after ${timeoutMs}ms`)
-          : lastError;
+      // On timeout, fail immediately — don't retry timeouts
+      if (isTimeout) {
+        throw new HttpTimeoutError(`Request to ${url} timed out after ${effectiveTimeout}ms`);
       }
 
+      // On last attempt, throw the error
+      if (isLastAttempt) {
+        throw lastError;
+      }
+
+      // Only retry on actual network errors (ECONNREFUSED, ENOTFOUND, etc.)
       if (!isRetryableError(lastError)) {
         throw lastError;
       }
